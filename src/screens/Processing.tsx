@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { FileText, X, Sparkles, Brain } from 'lucide-react';
 import { useApp } from '@/state/AppContext';
 import { Card } from '@/components/ui/Card';
@@ -6,45 +6,139 @@ import { Button } from '@/components/ui/Button';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { ProcessingSteps } from '@/components/documents/ProcessingSteps';
 import { podcasts } from '@/data/mock';
+import type { Podcast, ScriptLine, Chapter } from '@/types';
+import { generatePodcast } from '@/services/api';
 
 const statusMessages = [
   'Uploading your document securely…',
   'Extracting text from all pages…',
   'DocuCast is identifying the key concepts in your document…',
-  'Writing a natural podcast script with Gemini AI…',
+  'Writing a natural podcast script with Groq AI…',
   'Synthesizing natural-sounding voice with Edge-TTS…',
   'Encoding MP3 and adding chapter markers…',
 ];
 
+function parseScriptToLines(script: string): ScriptLine[] {
+  const lines: ScriptLine[] = [];
+  const speakerPattern = /^(HOST|EXPERT)[:\s]*(.+)$/;
+  const scriptLines = script.split("\n").filter((l) => l.trim().length > 0);
+  scriptLines.forEach((line, idx) => {
+    const match = line.match(speakerPattern);
+    if (match) {
+      lines.push({
+        id: `line-${idx}`,
+        speaker: match[1] as 'HOST' | 'EXPERT',
+        text: match[2].trim(),
+      });
+    } else {
+      lines.push({
+        id: `line-${idx}`,
+        speaker: 'HOST',
+        text: line.trim(),
+      });
+    }
+  });
+  return lines;
+}
+
+function buildPodcastFromResponse(
+  response: NonNullable<Awaited<ReturnType<typeof generatePodcast>>>,
+  fileName: string,
+): Podcast {
+  const scriptLines = parseScriptToLines(response.script || '');
+  const durationSec = response.audio_duration || Math.max(60, (response.script?.length || 0) / 15);
+  return {
+    id: `pod-${Date.now()}`,
+    docId: `doc-${Date.now()}`,
+    title: fileName.replace('.pdf', '').replace(/[-_]/g, ' '),
+    durationSec,
+    pages: response.pages_processed || 1,
+    language: 'English',
+    voice: 'sarah',
+    style: 'conversational',
+    category: 'Document',
+    date: new Date().toISOString().split('T')[0],
+    favorite: false,
+    downloaded: false,
+    coverAccent: '#3d96ff',
+    chapters: [
+      { id: 'c1', title: 'Introduction', startSec: 0 },
+      { id: 'c2', title: 'Main Discussion', startSec: Math.floor(durationSec / 3) },
+      { id: 'c3', title: 'Takeaways', startSec: Math.floor(durationSec * 2 / 3) },
+    ] as Chapter[],
+    summary: {
+      overview: response.script
+        ? response.script.substring(0, 300) + (response.script.length > 300 ? '...' : '')
+        : 'Podcast generated from document.',
+      keyConcepts: response.script ? ['Document content', 'Key insights from text'] : ['Generated content'],
+      takeaways: response.script ? ['Review the generated audio for full details'] : ['Audio generated'],
+    },
+    script: scriptLines,
+    // Audio data is stored separately; the frontend handles playback via base64
+    // We attach the base64 audio source to the component state if needed
+  } as Podcast;
+}
+
 export function Processing() {
-  const { uploadedFile, processingStep, setProcessingStep, navigate, setActivePodcast, toast } = useApp();
+  const { uploadedFile, uploadedFileRaw, processingStep, setProcessingStep, navigate, setActivePodcast, toast } = useApp();
   const [progress, setProgress] = useState(0);
   const [cancelled, setCancelled] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   const intervalRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    if (cancelled) return;
-    // Advance steps every ~2.5s
-    intervalRef.current = window.setInterval(() => {
-      setProcessingStep(processingStep + 1);
-    }, 2600);
-
-    return () => {
-      if (intervalRef.current) window.clearInterval(intervalRef.current);
-    };
-  }, [processingStep, setProcessingStep, cancelled]);
-
-  // When step reaches 6, navigate to podcast result
-  useEffect(() => {
-    if (processingStep >= 6 && !cancelled) {
+  const handleGenerate = useCallback(async () => {
+    if (!uploadedFileRaw) {
+      // No real file; fall back to mock data
       const pod = podcasts[0];
       setActivePodcast(pod);
       toast({ title: 'Podcast ready!', description: pod.title, variant: 'success' });
       navigate('podcast');
+      return;
     }
-  }, [processingStep, cancelled, navigate, setActivePodcast, toast]);
+    setIsGenerating(true);
+    try {
+      const result = await generatePodcast(uploadedFileRaw);
+      if (!result.success || result.error) {
+        toast({ title: 'Generation failed', description: result.error?.message || 'Unknown error.', variant: 'error' });
+        navigate('create');
+        return;
+      }
+      const podcastObj = buildPodcastFromResponse(result, uploadedFile?.name || 'Document');
+      // Store audio in a temporary URL or base64 for playback
+      // For MVP, we'll store the base64 audio in a custom state or pass it through navigation state
+      // Since react-router isn't used, we'll set the podcast with an extended property
+      // Actually, let's just set the active podcast; the AudioPlayer component can be modified to accept audio source
+      // For simplicity, we modify the podcast object to include audio base64
+      (podcastObj as any).audioBase64 = result.audio;
+      (podcastObj as any).audioFormat = result.audio_format;
+      setActivePodcast(podcastObj);
+      toast({ title: 'Podcast ready!', description: podcastObj.title, variant: 'success' });
+      navigate('podcast');
+    } catch (err: any) {
+      toast({ title: 'Generation error', description: err?.message || 'Something went wrong.', variant: 'error' });
+      navigate('create');
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [uploadedFile, uploadedFileRaw, navigate, setActivePodcast, toast]);
 
-  // Smooth progress bar
+  useEffect(() => {
+    if (cancelled) return;
+    intervalRef.current = window.setInterval(() => {
+      setProcessingStep((prev) => prev + 1);
+    }, 2600);
+    return () => {
+      if (intervalRef.current) window.clearInterval(intervalRef.current);
+    };
+  }, [cancelled, setProcessingStep]);
+
+  // Trigger generation at final step
+  useEffect(() => {
+    if (processingStep >= 6 && !cancelled && !isGenerating) {
+      handleGenerate();
+    }
+  }, [processingStep, cancelled, isGenerating, handleGenerate]);
+
   useEffect(() => {
     const target = ((processingStep + 1) / 6) * 100;
     const id = window.setInterval(() => {
@@ -95,7 +189,6 @@ export function Processing() {
           </div>
           <ProgressBar value={progress} />
         </div>
-
         <ProcessingSteps currentStep={processingStep} />
       </Card>
 

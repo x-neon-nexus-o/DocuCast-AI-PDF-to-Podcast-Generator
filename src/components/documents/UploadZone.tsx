@@ -7,11 +7,11 @@ interface UploadZoneProps {
 }
 
 export function UploadZone({ onFileSelected }: UploadZoneProps) {
-  const { uploadedFile, setUploadedFile, toast } = useApp();
+  const { uploadedFile, setUploadedFile, uploadedFileRaw, setUploadedFileRaw, toast } = useApp();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
 
-  const handleFile = (name: string, sizeBytes: number) => {
+  const handleFile = (name: string, sizeBytes: number, file?: File) => {
     const sizeMb = Math.max(0.1, +(sizeBytes / (1024 * 1024)).toFixed(1));
     if (sizeMb > 20) {
       toast({ title: 'File too large', description: 'Maximum file size is 20 MB.', variant: 'error' });
@@ -21,6 +21,7 @@ export function UploadZone({ onFileSelected }: UploadZoneProps) {
     const pages = Math.max(1, Math.round(sizeMb * 6));
     const fileObj = { name, sizeMb, pages };
     setUploadedFile(fileObj);
+    if (file) setUploadedFileRaw(file);
     onFileSelected?.(fileObj);
     toast({ title: 'PDF uploaded', description: name, variant: 'success' });
   };
@@ -34,7 +35,7 @@ export function UploadZone({ onFileSelected }: UploadZoneProps) {
         toast({ title: 'Unsupported file', description: 'Only PDF files are supported.', variant: 'error' });
         return;
       }
-      handleFile(file.name, file.size);
+      handleFile(file.name, file.size, file);
     }
   };
 
@@ -57,7 +58,7 @@ export function UploadZone({ onFileSelected }: UploadZoneProps) {
             </p>
           </div>
           <button
-            onClick={() => setUploadedFile(null)}
+            onClick={() => { setUploadedFile(null); setUploadedFileRaw(null); }}
             className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-white/5 hover:text-white"
             aria-label="Remove file"
           >
@@ -87,7 +88,7 @@ export function UploadZone({ onFileSelected }: UploadZoneProps) {
         className="hidden"
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) handleFile(file.name, file.size);
+          if (file) handleFile(file.name, file.size, file);
         }}
       />
       <div className={`mx-auto flex h-16 w-16 items-center justify-center rounded-2xl transition-all duration-300 ${
