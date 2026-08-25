@@ -1,0 +1,130 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-ink-950 text-slate-200 antialiased;
+    font-feature-settings: 'cv11', 'ss01', 'ss03';
+  }
+
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  ::selection {
+    @apply bg-brand-500/30 text-white;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-ink-600;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-ink-500;
+    background-clip: padding-box;
+  }
+
+  input, select, textarea {
+    font-family: inherit;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply border border-white/5 bg-white/[0.03] backdrop-blur-md;
+  }
+
+  .glass-strong {
+    @apply border border-white/10 bg-white/[0.05] backdrop-blur-xl;
+  }
+
+  .card-grad {
+    background: linear-gradient(155deg, rgba(255, 255, 255, 0.035) 0%, rgba(255, 255, 255, 0.012) 100%);
+  }
+
+  .skeleton {
+    @apply relative overflow-hidden rounded-md bg-ink-700/60;
+  background-image: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.05) 50%, transparent 100%);
+    background-size: 200% 100%;
+    @apply animate-shimmer;
+  }
+
+  .brand-grad {
+    background: linear-gradient(135deg, #3d96ff 0%, #22c8e0 100%);
+  }
+
+  .brand-grad-soft {
+    background: linear-gradient(135deg, rgba(61, 150, 255, 0.16) 0%, rgba(34, 200, 224, 0.1) 100%);
+  }
+
+  .text-grad {
+    background: linear-gradient(135deg, #7ab8ff 0%, #4cd9e8 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+
+  .focus-ring {
+    @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/60 focus-visible:ring-offset-2 focus-visible:ring-offset-ink-950;
+  }
+
+  .nav-link-anim {
+    @apply relative transition-colors duration-200;
+  }
+  .nav-link-anim::after {
+    content: '';
+    @apply absolute -bottom-1 left-0 h-px w-0 bg-brand-400 transition-all duration-300;
+  }
+  .nav-link-anim:hover::after {
+    @apply w-full;
+  }
+
+  .grid-bg {
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+    background-size: 56px 56px;
+  }
+
+  .radial-fade {
+    background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(27, 123, 246, 0.18) 0%, transparent 60%);
+  }
+
+  .blob {
+    @apply pointer-events-none absolute rounded-full blur-3xl;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .waveform-bar {
+    @apply inline-block w-[3px] rounded-full bg-brand-400/80;
+    animation: wave 1.1s ease-in-out infinite;
+  }
+}
