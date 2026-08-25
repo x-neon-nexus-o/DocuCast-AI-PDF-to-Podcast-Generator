@@ -1,0 +1,28 @@
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+python-dotenv>=1.0.0
+pydantic>=2.5.0
+httpx>=0.27.0
+# PDF Processing
+PyPDF2>=3.0.0
+py-pdf>=1.0.0
+
+# OCR (for scanned/image-only PDFs)
+pytesseract>=0.3.10
+pdf2image>=1.17.0
+Pillow>=10.0.0
+
+# Groq SDK
+groq>=0.4.0
+
+# Edge-TTS
+generators==0.1.5
+edge-tts>=6.1.0
+
+# Testing
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+httpx>=0.27.0  # also for async test client
+
+# Audio / Media
+# FFmpeg is a system dependency — install separately (see README.md)

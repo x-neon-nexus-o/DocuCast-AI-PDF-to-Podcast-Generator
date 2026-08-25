@@ -29,13 +29,15 @@ interface AppState {
 
   // Create flow
   uploadedFile: { name: string; sizeMb: number; pages: number } | null;
+  uploadedFileRaw: File | null;
   setUploadedFile: (f: { name: string; sizeMb: number; pages: number } | null) => void;
+  setUploadedFileRaw: (f: File | null) => void;
   genConfig: GenerationConfig;
   setGenConfig: (c: Partial<GenerationConfig>) => void;
 
   // Processing + active podcast
   processingStep: number;
-  setProcessingStep: (n: number) => void;
+  setProcessingStep: (n: number | ((prev: number) => number)) => void;
   activePodcast: Podcast | null;
   setActivePodcast: (p: Podcast | null) => void;
   startProcessing: () => void;
@@ -75,6 +77,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [pods, setPods] = useState<Podcast[]>(seedPodcasts);
 
   const [uploadedFile, setUploadedFile] = useState<AppState['uploadedFile']>(null);
+  const [uploadedFileRaw, setUploadedFileRaw] = useState<File | null>(null);
   const [genConfig, setGenConfigState] = useState<GenerationConfig>(defaultConfig);
   const [processingStep, setProcessingStep] = useState(0);
   const [activePodcast, setActivePodcast] = useState<Podcast | null>(null);
@@ -169,6 +172,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     deleteDoc,
     uploadedFile,
     setUploadedFile,
+    uploadedFileRaw,
+    setUploadedFileRaw,
     genConfig,
     setGenConfig,
     processingStep,
@@ -186,7 +191,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dismissToast,
   }), [
     route, navigate, authed, user, login, logout, docs, pods, toggleFavoriteDoc,
-    toggleFavoritePodcast, renameDoc, deleteDoc, uploadedFile, genConfig, processingStep,
+    toggleFavoritePodcast, renameDoc, deleteDoc, uploadedFile, uploadedFileRaw, genConfig, processingStep,
     activePodcast, startProcessing, playing, miniPodcast, openMiniPlayer, closeMiniPlayer,
     toasts, toast, dismissToast,
   ]);

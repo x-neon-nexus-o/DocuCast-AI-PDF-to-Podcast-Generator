@@ -102,7 +102,19 @@ export function AudioPlayer({ podcast, compact = false }: AudioPlayerProps) {
             <Button variant="ghost" size="icon" onClick={() => { toast({ title: 'Share link copied', variant: 'info' }); }} aria-label="Share">
               <Share2 size={18} />
             </Button>
-            <Button variant="ghost" size="icon" onClick={() => toast({ title: 'Downloading MP3…', description: `${podcast.title}.mp3`, variant: 'success' })} aria-label="Download MP3">
+            <Button variant="ghost" size="icon" onClick={() => {
+              if ((podcast as any)?.audioBase64) {
+                const link = document.createElement('a');
+                link.href = `data:audio/mp3;base64,${(podcast as any).audioBase64}`;
+                link.download = `${podcast.title.replace(/\s+/g, '_')}.mp3`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                toast({ title: 'Download started', description: `${podcast.title}.mp3`, variant: 'success' });
+              } else {
+                toast({ title: 'Downloading MP3…', description: `${podcast.title}.mp3`, variant: 'success' });
+              }
+            }} aria-label="Download MP3">
               <Download size={18} />
             </Button>
           </div>
@@ -174,7 +186,19 @@ export function AudioPlayer({ podcast, compact = false }: AudioPlayerProps) {
               size="sm"
               variant="secondary"
               leftIcon={<Download size={14} />}
-              onClick={() => toast({ title: 'Downloading MP3…', description: `${podcast.title}.mp3`, variant: 'success' })}
+              onClick={() => {
+                if ((podcast as any)?.audioBase64) {
+                  const link = document.createElement('a');
+                  link.href = `data:audio/mp3;base64,${(podcast as any).audioBase64}`;
+                  link.download = `${podcast.title.replace(/\s+/g, '_')}.mp3`;
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                  toast({ title: 'Download started', description: `${podcast.title}.mp3`, variant: 'success' });
+                } else {
+                  toast({ title: 'Downloading MP3…', description: `${podcast.title}.mp3`, variant: 'success' });
+                }
+              }}
             >
               Download
             </Button>
