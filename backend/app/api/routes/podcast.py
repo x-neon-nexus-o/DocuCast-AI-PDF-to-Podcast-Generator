@@ -1,14 +1,19 @@
 import logging
 import time
 import base64
+import re
 import tempfile
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, status
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, status
 from fastapi.responses import JSONResponse
+from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.config import settings
+from app import db as db_module
+from app.api.deps import get_current_user, get_db
+from app.schemas.auth import UserOut
 from app.schemas.podcast import PodcastGenerateResponse
 from app.utils.file_utils import generate_safe_filename, ensure_dir
 from app.utils.cleanup import safe_remove
@@ -21,10 +26,125 @@ from app.services.audio_service import optimize_audio, AudioServiceError
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+_SCRIPT_LINE_RE = re.compile(r"^(HOST|EXPERT)[:\s]*(.+)$")
+
+
+def _script_lines(script: str) -> list:
+    """Parse a generated script into {id, speaker, text} lines."""
+    lines = []
+    for i, raw in enumerate([l for l in script.split("\n") if l.strip()]):
+        match = _SCRIPT_LINE_RE.match(raw)
+        if match:
+            lines.append(
+                {"id": f"line-{i}", "speaker": match.group(1), "text": match.group(2).strip()}
+            )
+        else:
+            lines.append({"id": f"line-{i}", "speaker": "HOST", "text": raw.strip()})
+    return lines
+
+
+async def _persist_generation(
+    db: AsyncIOMotorDatabase,
+    user: UserOut,
+    *,
+    filename: str,
+    script: str,
+    audio_base64: str,
+    audio_format: str,
+    pages_processed: int,
+    audio_duration: float,
+):
+    """Persist the generated document + podcast into MongoDB.
+
+    Returns (doc_id, podcast_id). Raises on DB failure so the caller can
+    surface a 'saved: false' flag while still returning the audio.
+    """
+    from app.schemas.data import DocumentCreate, PodcastCreate
+
+    user_id = db_module.to_object_id(user.id)
+    now = db_module.utcnow()
+
+    size_mb = 0.0
+    try:
+        # Audio base64 length -> approx binary size
+        size_mb = round((len(audio_base64) * 3 / 4) / (1024 * 1024), 2)
+    except Exception:
+        pass
+
+    doc_payload = DocumentCreate(
+        name=filename,
+        type="pdf",
+        pages=pages_processed,
+        status="ready",
+        date=db_module.iso_date(now),
+        audioDurationSec=int(audio_duration) if audio_duration else None,
+        category="Document",
+        sizeMb=size_mb,
+        hasAudio=True,
+        favorite=False,
+    )
+    doc_result = await db[db_module.DOCUMENTS].insert_one(
+        {
+            **doc_payload.model_dump(),
+            "user_id": user_id,
+            "created_at": now,
+        }
+    )
+    doc_id = doc_result.inserted_id
+
+    title = Path(filename).stem.replace("_", " ").replace("-", " ")
+    pod_payload = PodcastCreate(
+        docId=str(doc_id),
+        docName=filename,
+        title=title,
+        durationSec=audio_duration or 0,
+        pages=pages_processed,
+        language="English",
+        voice="sarah",
+        style="conversational",
+        category="Document",
+        date=db_module.iso_date(now),
+        favorite=False,
+        downloaded=False,
+        coverAccent="#3d96ff",
+        chapters=[
+            {"id": "c1", "title": "Introduction", "startSec": 0},
+            {"id": "c2", "title": "Main Discussion", "startSec": int((audio_duration or 0) / 3)},
+            {"id": "c3", "title": "Takeaways", "startSec": int((audio_duration or 0) * 2 / 3)},
+        ],
+        summary={
+            "overview": (script[:300] + "..." if len(script) > 300 else script),
+            "keyConcepts": ["Document content", "Key insights from text"],
+            "takeaways": ["Review the generated audio for full details"],
+        },
+        script=_script_lines(script),
+        audioBase64=audio_base64,
+        audioFormat=audio_format,
+    )
+    pod_result = await db[db_module.PODCASTS].insert_one(
+        {
+            **pod_payload.model_dump(exclude={"audioBase64"}),
+            "user_id": user_id,
+            "created_at": now,
+            "hasAudio": True,
+            "audioBase64": audio_base64,
+        }
+    )
+
+    logger.info(
+        "Generation persisted to MongoDB: doc=%s podcast=%s (user=%s)",
+        doc_id,
+        pod_result.inserted_id,
+        user.email,
+    )
+    return str(doc_id), str(pod_result.inserted_id)
+
 
 @router.post("/podcast/generate", response_model=PodcastGenerateResponse)
 async def generate_podcast(
     file: UploadFile = File(...),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    user: UserOut = Depends(get_current_user),
 ):
     start_time = time.time()
     temp_pdf_path: Optional[str] = None
@@ -169,6 +289,25 @@ async def generate_podcast(
 
         logger.info("Pipeline complete in %.2f seconds", processing_time)
 
+        # Persist the generated document + podcast into MongoDB (user-scoped).
+        saved = False
+        saved_doc_id = None
+        saved_podcast_id = None
+        try:
+            saved_doc_id, saved_podcast_id = await _persist_generation(
+                db,
+                user,
+                filename=original_name,
+                script=script,
+                audio_base64=audio_base64,
+                audio_format="mp3",
+                pages_processed=pages_processed,
+                audio_duration=round(audio_duration_approx, 1),
+            )
+            saved = True
+        except Exception as exc:  # noqa: BLE001 - never let storage failure break the response
+            logger.error("Failed to persist generation to MongoDB: %s", exc)
+
         return PodcastGenerateResponse(
             success=True,
             filename=original_name,
@@ -179,6 +318,9 @@ async def generate_podcast(
             processing_time=round(processing_time, 2),
             audio_duration=round(audio_duration_approx, 1),
             model_used=settings.GROQ_MODEL,
+            saved=saved,
+            saved_doc_id=saved_doc_id,
+            saved_podcast_id=saved_podcast_id,
         )
 
     finally:

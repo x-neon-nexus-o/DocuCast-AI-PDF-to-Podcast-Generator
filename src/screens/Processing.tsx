@@ -80,7 +80,7 @@ function buildPodcastFromResponse(
 }
 
 export function Processing() {
-  const { uploadedFile, uploadedFileRaw, processingStep, setProcessingStep, navigate, setActivePodcast, toast } = useApp();
+  const { uploadedFile, uploadedFileRaw, processingStep, setProcessingStep, navigate, setActivePodcast, loadUserData, toast } = useApp();
   const [progress, setProgress] = useState(0);
   const [cancelled, setCancelled] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -104,23 +104,37 @@ export function Processing() {
         return;
       }
       const podcastObj = buildPodcastFromResponse(result, uploadedFile?.name || 'Document');
-      // Store audio in a temporary URL or base64 for playback
-      // For MVP, we'll store the base64 audio in a custom state or pass it through navigation state
-      // Since react-router isn't used, we'll set the podcast with an extended property
-      // Actually, let's just set the active podcast; the AudioPlayer component can be modified to accept audio source
-      // For simplicity, we modify the podcast object to include audio base64
-      (podcastObj as any).audioBase64 = result.audio;
-      (podcastObj as any).audioFormat = result.audio_format;
+      // Attach the real audio so the player/download use the generated MP3.
+      podcastObj.audioBase64 = result.audio;
+      podcastObj.audioFormat = result.audio_format;
+      podcastObj.hasAudio = !!result.audio;
+      // If the backend already persisted everything to MongoDB, use the real ids.
+      if (result.saved && result.saved_doc_id && result.saved_podcast_id) {
+        podcastObj.id = result.saved_podcast_id;
+        podcastObj.docId = result.saved_doc_id;
+      }
       setActivePodcast(podcastObj);
-      toast({ title: 'Podcast ready!', description: podcastObj.title, variant: 'success' });
+      // Refresh documents + podcasts from MongoDB so the dashboard/library
+      // reflect the newly generated (and persisted) items.
+      loadUserData().catch(() => {});
+      if (!result.saved) {
+        toast({
+          title: 'Podcast ready, but not saved',
+          description: 'The database was unavailable, so this podcast was not added to your library.',
+          variant: 'warning',
+        });
+      } else {
+        toast({ title: 'Podcast ready!', description: podcastObj.title, variant: 'success' });
+      }
       navigate('podcast');
-    } catch (err: any) {
-      toast({ title: 'Generation error', description: err?.message || 'Something went wrong.', variant: 'error' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Something went wrong.';
+      toast({ title: 'Generation error', description: message, variant: 'error' });
       navigate('create');
     } finally {
       setIsGenerating(false);
     }
-  }, [uploadedFile, uploadedFileRaw, navigate, setActivePodcast, toast]);
+  }, [uploadedFile, uploadedFileRaw, navigate, setActivePodcast, loadUserData, toast]);
 
   useEffect(() => {
     if (cancelled) return;

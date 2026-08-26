@@ -3,6 +3,7 @@ import { Mail, Lock, Eye, EyeOff, User, ArrowRight, AlertCircle, CheckCircle2 } 
 import { useApp } from '@/state/AppContext';
 import { Button } from '@/components/ui/Button';
 import { Logo } from '@/components/ui/Logo';
+import { ApiError } from '@/services/api';
 
 type Mode = 'login' | 'signup';
 
@@ -10,8 +11,14 @@ interface AuthProps {
   mode: Mode;
 }
 
+// Demo shortcut used by the "Continue with Google" button until real OAuth is
+// wired up. The account is created in MongoDB on first use.
+const DEMO_EMAIL = 'demo@docucast.app';
+const DEMO_PASSWORD = 'demo1234';
+const DEMO_NAME = 'Demo User';
+
 export function Auth({ mode }: AuthProps) {
-  const { navigate, login, toast } = useApp();
+  const { navigate, login, signup, toast } = useApp();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -36,31 +43,56 @@ export function Auth({ mode }: AuthProps) {
     return Object.keys(e).length === 0;
   };
 
+  const submit = async (submitEmail: string, submitPassword: string, submitName?: string) => {
+    setLoading(true);
+    setErrors({});
+    try {
+      if (isSignup) {
+        await signup(submitName?.trim() || 'DocuCast User', submitEmail, submitPassword);
+        toast({ title: 'Account created', description: 'Your account is stored in MongoDB.', variant: 'success' });
+      } else {
+        await login(submitEmail, submitPassword, remember);
+        toast({ title: 'Welcome back', description: 'Signed in successfully.', variant: 'success' });
+      }
+      setSuccess(true);
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : 'Unable to reach the backend. Make sure it is running.';
+      setErrors({ form: message });
+      toast({
+        title: isSignup ? 'Sign up failed' : 'Sign in failed',
+        description: message,
+        variant: 'error',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const onSubmit = (ev: FormEvent) => {
     ev.preventDefault();
     if (!validate()) return;
-    setLoading(true);
-    setErrors({});
-    window.setTimeout(() => {
-      setLoading(false);
-      setSuccess(true);
-      toast({
-        title: isSignup ? 'Account created' : 'Welcome back',
-        description: 'Redirecting to your dashboard…',
-        variant: 'success',
-      });
-      window.setTimeout(() => {
-        login(email, isSignup ? name : undefined);
-      }, 800);
-    }, 1200);
+    submit(email, password, isSignup ? name : undefined);
   };
 
-  const googleSignIn = () => {
+  const googleSignIn = async () => {
     setLoading(true);
-    window.setTimeout(() => {
-      login('paras@docucast.app', 'Paras');
-      toast({ title: 'Signed in with Google', variant: 'success' });
-    }, 1000);
+    setErrors({});
+    try {
+      try {
+        await login(DEMO_EMAIL, DEMO_PASSWORD, true);
+      } catch {
+        // First time — create the demo account in MongoDB, then sign in.
+        await signup(DEMO_NAME, DEMO_EMAIL, DEMO_PASSWORD);
+      }
+      toast({ title: 'Signed in with Google (demo)', description: `Welcome, ${DEMO_NAME}`, variant: 'success' });
+      setSuccess(true);
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : 'Unable to reach the backend. Make sure it is running.';
+      setErrors({ form: message });
+      toast({ title: 'Sign in failed', description: message, variant: 'error' });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -114,10 +146,11 @@ export function Auth({ mode }: AuthProps) {
                 </div>
               ) : (
                 <>
-                  {/* Google */}
+                  {/* Google (demo) */}
                   <button
                     onClick={googleSignIn}
-                    className="flex w-full items-center justify-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] py-3 text-[13.5px] font-medium text-slate-200 transition-colors hover:bg-white/[0.06]"
+                    disabled={loading}
+                    className="flex w-full items-center justify-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] py-3 text-[13.5px] font-medium text-slate-200 transition-colors hover:bg-white/[0.06] disabled:opacity-60"
                   >
                     <GoogleIcon />
                     Continue with Google
@@ -130,6 +163,12 @@ export function Auth({ mode }: AuthProps) {
                   </div>
 
                   <form onSubmit={onSubmit} className="space-y-4" noValidate>
+                    {errors.form && (
+                      <div className="flex items-start gap-2 rounded-xl border border-bad-500/30 bg-bad-500/10 px-3 py-2.5 text-[12.5px] text-bad-300 animate-fade-in-fast">
+                        <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                        <span>{errors.form}</span>
+                      </div>
+                    )}
                     {isSignup && (
                       <Field
                         label="Name"

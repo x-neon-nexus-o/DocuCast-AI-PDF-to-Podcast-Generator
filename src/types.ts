@@ -64,6 +64,11 @@ export interface Podcast {
   favorite?: boolean;
   downloaded?: boolean;
   coverAccent: string;
+  /** Base64-encoded MP3 (from the generate response or the database). */
+  audioBase64?: string;
+  audioFormat?: string;
+  /** Whether an audio file is persisted for this podcast. */
+  hasAudio?: boolean;
   chapters: Chapter[];
   summary: {
     overview: string;
