@@ -2,26 +2,30 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from 'react';
 import type { Route, Toast, DocRecord, Podcast, GenerationConfig } from '@/types';
-import { documents as seedDocs, podcasts as seedPodcasts } from '@/data/mock';
+import * as api from '@/services/api';
 
 interface AppState {
   route: Route;
   navigate: (route: Route) => void;
 
-  // Auth (mock)
+  // Auth (MongoDB-backed: users + sessions stored in MongoDB)
   authed: boolean;
+  sessionLoading: boolean;
   user: { name: string; email: string; avatarHue: number };
-  login: (email: string, name?: string) => void;
-  logout: () => void;
+  login: (email: string, password: string, remember?: boolean) => Promise<void>;
+  signup: (name: string, email: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
 
-  // Data
+  // Data (persisted in MongoDB, scoped to the signed-in user)
   docs: DocRecord[];
   podcasts: Podcast[];
+  loadUserData: () => Promise<void>;
   toggleFavoriteDoc: (id: string) => void;
   toggleFavoritePodcast: (id: string) => void;
   renameDoc: (id: string, name: string) => void;
@@ -68,13 +72,34 @@ const defaultConfig: GenerationConfig = {
   length: 'medium',
 };
 
+const guestUser = { name: 'Guest', email: '', avatarHue: 205 };
+
+function hueFromEmail(email: string): number {
+  let hash = 0;
+  for (let i = 0; i < email.length; i++) hash = (hash * 31 + email.charCodeAt(i)) % 360;
+  return hash;
+}
+
+function makeUser(u: api.UserInfo): { name: string; email: string; avatarHue: number } {
+  const cleanName = u.name && u.name.trim() ? u.name.trim() : u.email.split('@')[0];
+  const niceName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
+  return { name: niceName, email: u.email, avatarHue: hueFromEmail(u.email) };
+}
+
+function errorMessage(err: unknown): string {
+  if (err instanceof api.ApiError) return err.message;
+  if (err instanceof Error) return err.message;
+  return 'Something went wrong. Please try again.';
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const [route, setRoute] = useState<Route>('landing');
   const [authed, setAuthed] = useState(false);
-  const [user, setUser] = useState({ name: 'Paras', email: 'paras@docucast.app', avatarHue: 205 });
+  const [sessionLoading, setSessionLoading] = useState(true);
+  const [user, setUser] = useState(guestUser);
 
-  const [docs, setDocs] = useState<DocRecord[]>(seedDocs);
-  const [pods, setPods] = useState<Podcast[]>(seedPodcasts);
+  const [docs, setDocs] = useState<DocRecord[]>([]);
+  const [pods, setPods] = useState<Podcast[]>([]);
 
   const [uploadedFile, setUploadedFile] = useState<AppState['uploadedFile']>(null);
   const [uploadedFileRaw, setUploadedFileRaw] = useState<File | null>(null);
@@ -104,39 +129,169 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setToasts((prev) => prev.filter((x) => x.id !== id));
   }, []);
 
-  const login = useCallback((email: string, name?: string) => {
-    const cleanName = name && name.trim() ? name.trim() : email.split('@')[0].replace(/[._]/g, ' ');
-    const niceName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
-    setUser({ name: niceName, email, avatarHue: 205 });
-    setAuthed(true);
-    navigate('dashboard');
-  }, [navigate]);
+  // -------------------------------------------------------------------------
+  // Data loading (from MongoDB)
+  // -------------------------------------------------------------------------
 
-  const logout = useCallback(() => {
+  const loadUserData = useCallback(async () => {
+    try {
+      const [loadedDocs, loadedPods] = await Promise.all([
+        api.fetchDocuments(),
+        api.fetchPodcasts(),
+      ]);
+      setDocs(loadedDocs);
+      setPods(loadedPods);
+    } catch (err) {
+      toast({
+        title: 'Could not load your library',
+        description: errorMessage(err),
+        variant: 'error',
+      });
+    }
+  }, [toast]);
+
+  // -------------------------------------------------------------------------
+  // Auth
+  // -------------------------------------------------------------------------
+
+  const login = useCallback(
+    async (email: string, password: string, remember = true) => {
+      const res = await api.login(email, password, remember);
+      setUser(makeUser(res.user));
+      setAuthed(true);
+      await loadUserData();
+      navigate('dashboard');
+    },
+    [navigate, loadUserData],
+  );
+
+  const signup = useCallback(
+    async (name: string, email: string, password: string) => {
+      const res = await api.signup(name, email, password);
+      setUser(makeUser(res.user));
+      setAuthed(true);
+      await loadUserData();
+      navigate('dashboard');
+    },
+    [navigate, loadUserData],
+  );
+
+  const logout = useCallback(async () => {
+    try {
+      await api.logout(); // destroys the session token in MongoDB
+    } catch {
+      /* best effort */
+    }
     setAuthed(false);
+    setUser(guestUser);
+    setDocs([]);
+    setPods([]);
     setMiniPodcast(null);
     setPlaying(false);
     navigate('landing');
   }, [navigate]);
 
-  const toggleFavoriteDoc = useCallback((id: string) => {
-    setDocs((prev) => prev.map((d) => (d.id === id ? { ...d, favorite: !d.favorite } : d)));
-  }, []);
+  // Restore the session on first load (token -> MongoDB session lookup).
+  useEffect(() => {
+    let cancelled = false;
 
-  const toggleFavoritePodcast = useCallback((id: string) => {
-    setPods((prev) => prev.map((p) => (p.id === id ? { ...p, favorite: !p.favorite } : p)));
-    if (activePodcast?.id === id) {
-      setActivePodcast((prev) => (prev ? { ...prev, favorite: !prev.favorite } : prev));
-    }
-  }, [activePodcast?.id]);
+    const restore = async () => {
+      if (!api.getToken()) {
+        if (!cancelled) setSessionLoading(false);
+        return;
+      }
+      try {
+        const me = await api.getMe();
+        if (cancelled) return;
+        setUser(makeUser(me));
+        setAuthed(true);
+        await loadUserData();
+      } catch {
+        // apiFetch clears the invalid token automatically on 401.
+      } finally {
+        if (!cancelled) setSessionLoading(false);
+      }
+    };
 
-  const renameDoc = useCallback((id: string, name: string) => {
-    setDocs((prev) => prev.map((d) => (d.id === id ? { ...d, name } : d)));
-  }, []);
+    const onUnauthorized = () => {
+      setAuthed(false);
+      setUser(guestUser);
+      setDocs([]);
+      setPods([]);
+      setMiniPodcast(null);
+      setPlaying(false);
+      navigate('landing');
+    };
 
-  const deleteDoc = useCallback((id: string) => {
-    setDocs((prev) => prev.filter((d) => d.id !== id));
-  }, []);
+    restore();
+    window.addEventListener(api.UNAUTHORIZED_EVENT, onUnauthorized);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(api.UNAUTHORIZED_EVENT, onUnauthorized);
+    };
+  }, [navigate, loadUserData]);
+
+  // -------------------------------------------------------------------------
+  // Document / podcast mutations (optimistic UI + MongoDB persistence)
+  // -------------------------------------------------------------------------
+
+  const toggleFavoriteDoc = useCallback(
+    (id: string) => {
+      const target = docs.find((d) => d.id === id);
+      if (!target) return;
+      const next = !target.favorite;
+      setDocs((prev) => prev.map((d) => (d.id === id ? { ...d, favorite: next } : d)));
+      api
+        .updateDocument(id, { favorite: next })
+        .catch((err) =>
+          toast({ title: 'Could not update document', description: errorMessage(err), variant: 'error' }),
+        );
+    },
+    [docs, toast],
+  );
+
+  const renameDoc = useCallback(
+    (id: string, name: string) => {
+      setDocs((prev) => prev.map((d) => (d.id === id ? { ...d, name } : d)));
+      api
+        .updateDocument(id, { name })
+        .catch((err) =>
+          toast({ title: 'Could not rename document', description: errorMessage(err), variant: 'error' }),
+        );
+    },
+    [toast],
+  );
+
+  const deleteDoc = useCallback(
+    (id: string) => {
+      const target = docs.find((d) => d.id === id);
+      setDocs((prev) => prev.filter((d) => d.id !== id));
+      if (target) {
+        api
+          .deleteDocument(id)
+          .catch((err) =>
+            toast({ title: 'Could not delete document', description: errorMessage(err), variant: 'error' }),
+          );
+      }
+    },
+    [docs, toast],
+  );
+
+  const toggleFavoritePodcast = useCallback(
+    (id: string) => {
+      const target = pods.find((p) => p.id === id);
+      if (!target) return;
+      const next = !target.favorite;
+      setPods((prev) => prev.map((p) => (p.id === id ? { ...p, favorite: next } : p)));
+      setActivePodcast((prev) => (prev && prev.id === id ? { ...prev, favorite: next } : prev));
+      api
+        .updatePodcast(id, { favorite: next })
+        .catch((err) =>
+          toast({ title: 'Could not update podcast', description: errorMessage(err), variant: 'error' }),
+        );
+    },
+    [pods, toast],
+  );
 
   const setGenConfig = useCallback((c: Partial<GenerationConfig>) => {
     setGenConfigState((prev) => ({ ...prev, ...c }));
@@ -157,44 +312,51 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setPlaying(false);
   }, []);
 
-  const value = useMemo<AppState>(() => ({
-    route,
-    navigate,
-    authed,
-    user,
-    login,
-    logout,
-    docs,
-    podcasts: pods,
-    toggleFavoriteDoc,
-    toggleFavoritePodcast,
-    renameDoc,
-    deleteDoc,
-    uploadedFile,
-    setUploadedFile,
-    uploadedFileRaw,
-    setUploadedFileRaw,
-    genConfig,
-    setGenConfig,
-    processingStep,
-    setProcessingStep,
-    activePodcast,
-    setActivePodcast,
-    startProcessing,
-    playing,
-    setPlaying,
-    miniPodcast,
-    openMiniPlayer,
-    closeMiniPlayer,
-    toasts,
-    toast,
-    dismissToast,
-  }), [
-    route, navigate, authed, user, login, logout, docs, pods, toggleFavoriteDoc,
-    toggleFavoritePodcast, renameDoc, deleteDoc, uploadedFile, uploadedFileRaw, genConfig, processingStep,
-    activePodcast, startProcessing, playing, miniPodcast, openMiniPlayer, closeMiniPlayer,
-    toasts, toast, dismissToast,
-  ]);
+  const value = useMemo<AppState>(
+    () => ({
+      route,
+      navigate,
+      authed,
+      sessionLoading,
+      user,
+      login,
+      signup,
+      logout,
+      docs,
+      podcasts: pods,
+      loadUserData,
+      toggleFavoriteDoc,
+      toggleFavoritePodcast,
+      renameDoc,
+      deleteDoc,
+      uploadedFile,
+      setUploadedFile,
+      uploadedFileRaw,
+      setUploadedFileRaw,
+      genConfig,
+      setGenConfig,
+      processingStep,
+      setProcessingStep,
+      activePodcast,
+      setActivePodcast,
+      startProcessing,
+      playing,
+      setPlaying,
+      miniPodcast,
+      openMiniPlayer,
+      closeMiniPlayer,
+      toasts,
+      toast,
+      dismissToast,
+    }),
+    [
+      route, navigate, authed, sessionLoading, user, login, signup, logout, docs, pods,
+      loadUserData, toggleFavoriteDoc, toggleFavoritePodcast, renameDoc, deleteDoc,
+      uploadedFile, uploadedFileRaw, genConfig, setGenConfig, processingStep,
+      setProcessingStep, activePodcast, setActivePodcast, startProcessing, playing,
+      setPlaying, miniPodcast, openMiniPlayer, closeMiniPlayer, toasts, toast, dismissToast,
+    ],
+  );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

@@ -2,6 +2,7 @@ import { AppProvider, useApp } from '@/state/AppContext';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { ToastHost } from '@/components/ui/Toast';
 import { MiniPlayer } from '@/components/audio/MiniPlayer';
+import { Logo } from '@/components/ui/Logo';
 import { Landing } from '@/screens/Landing';
 import { Auth } from '@/screens/Auth';
 import { Dashboard } from '@/screens/Dashboard';
@@ -18,7 +19,20 @@ import { Help } from '@/screens/Help';
 import type { Route } from '@/types';
 
 function Router() {
-  const { route, authed, miniPodcast } = useApp();
+  const { route, authed, sessionLoading, miniPodcast } = useApp();
+
+  // While we restore the session from MongoDB (token -> sessions collection)
+  // on first load, show a splash instead of flashing the login screen.
+  if (sessionLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-ink-950">
+        <div className="flex flex-col items-center gap-3">
+          <Logo />
+          <p className="text-[13px] text-slate-500">Restoring your session…</p>
+        </div>
+      </div>
+    );
+  }
 
   // Public screens (no auth required)
   if (route === 'landing') return <Landing />;

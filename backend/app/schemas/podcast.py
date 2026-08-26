@@ -21,6 +21,9 @@ class PodcastGenerateResponse(BaseModel):
     processing_time: Optional[float] = None
     audio_duration: Optional[float] = None
     model_used: Optional[str] = None
+    saved: Optional[bool] = None  # Whether the result was persisted to MongoDB
+    saved_doc_id: Optional[str] = None
+    saved_podcast_id: Optional[str] = None
     error: Optional[ErrorDetail] = None
 
 
@@ -28,3 +31,4 @@ class HealthResponse(BaseModel):
     status: str
     version: str
     message: str
+    database: Optional[dict] = None

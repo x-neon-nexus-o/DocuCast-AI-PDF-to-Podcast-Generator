@@ -103,9 +103,9 @@ export function AudioPlayer({ podcast, compact = false }: AudioPlayerProps) {
               <Share2 size={18} />
             </Button>
             <Button variant="ghost" size="icon" onClick={() => {
-              if ((podcast as any)?.audioBase64) {
+              if (podcast.audioBase64) {
                 const link = document.createElement('a');
-                link.href = `data:audio/mp3;base64,${(podcast as any).audioBase64}`;
+                link.href = `data:audio/mp3;base64,${podcast.audioBase64}`;
                 link.download = `${podcast.title.replace(/\s+/g, '_')}.mp3`;
                 document.body.appendChild(link);
                 link.click();
@@ -187,9 +187,9 @@ export function AudioPlayer({ podcast, compact = false }: AudioPlayerProps) {
               variant="secondary"
               leftIcon={<Download size={14} />}
               onClick={() => {
-                if ((podcast as any)?.audioBase64) {
+                if (podcast.audioBase64) {
                   const link = document.createElement('a');
-                  link.href = `data:audio/mp3;base64,${(podcast as any).audioBase64}`;
+                  link.href = `data:audio/mp3;base64,${podcast.audioBase64}`;
                   link.download = `${podcast.title.replace(/\s+/g, '_')}.mp3`;
                   document.body.appendChild(link);
                   link.click();
