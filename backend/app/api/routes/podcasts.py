@@ -139,7 +139,7 @@ async def update_podcast(
     result = await db[db_module.PODCASTS].find_one_and_update(
         {"_id": oid, "user_id": user_id},
         {"$set": update},
-        return_document=True,
+        return_document=True,  # type: ignore[arg-type]
     )
     if result is None:
         raise HTTPException(status_code=404, detail="Podcast not found.")
