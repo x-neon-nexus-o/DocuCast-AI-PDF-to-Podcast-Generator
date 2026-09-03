@@ -206,9 +206,9 @@ async def generate_podcast(
             )
 
         # Save to temp with safe name
-        ensure_dir("backend/temp")
+        ensure_dir("temp")
         safe_name = generate_safe_filename(original_name)
-        temp_pdf_path = f"backend/temp/{safe_name}"
+        temp_pdf_path = f"temp/{safe_name}"
         with open(temp_pdf_path, "wb") as f:
             f.write(contents)
 
