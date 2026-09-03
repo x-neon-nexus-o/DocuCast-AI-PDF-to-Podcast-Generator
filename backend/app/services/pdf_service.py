@@ -35,7 +35,7 @@ def clean_extracted_text(text: str) -> str:
     return combined.strip()
 
 
-def _extract_text_with_py_pdf(file_path: str, max_pages: int = 10) -> List[str]:
+def _extract_text_with_py_pdf(file_path: str, max_pages: int = 10) -> Tuple[List[str], int, int]:
     reader = PyPDF2.PdfReader(str(file_path))
     total_pages = len(reader.pages)
     pages_to_read = min(max_pages, total_pages)
